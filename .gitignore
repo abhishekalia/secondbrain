@@ -1,5 +1,8 @@
 .venv/
-logs/
 __pycache__/
 *.pyc
+logs/
 backups/
+memories/*.jsonl
+.env
+.DS_Store
