@@ -1,0 +1,3 @@
+- Act quickly; test and adjust.
+- Take calculated bets; avoid blind risks.
+- Zoom out, then make the next reversible step.
