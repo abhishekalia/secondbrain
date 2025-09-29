@@ -1,0 +1,27 @@
+# Sensitive data
+my_data/raw/whatsapp_*.txt
+my_data/personal/
+*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Streamlit
+.streamlit/
+
+# Models
+models/*.bin
+models/*.gguf
+
+# Qdrant
+qdrant_storage/
+
+# Mac
+.DS_Store
+
+# Keep processed data only
+!my_data/processed/
+!my_data/training_data.json
