@@ -50,5 +50,35 @@
     ],
     "primary_state": "\ud83e\udde0",
     "timestamp": "2025-10-04T11:20:32.513759"
+  },
+  {
+    "role": "user",
+    "content": "I woke up early today - had a productive early work session but my energy drained around 12pm, now i'm slowly trying to reach baseline again.",
+    "detected_state": {
+      "emoji": "\ud83c\udf00",
+      "name": "spiral",
+      "confidence": 20
+    },
+    "timestamp": "2025-10-04T15:13:51.315252"
+  },
+  {
+    "role": "user",
+    "content": "Yes i ate and now im working again so it's a little better. ",
+    "detected_state": {
+      "emoji": "\ud83c\udf00",
+      "name": "spiral",
+      "confidence": 20
+    },
+    "timestamp": "2025-10-04T15:14:26.884928"
+  },
+  {
+    "role": "user",
+    "content": "Fuck this isn't working",
+    "detected_state": {
+      "emoji": "\ud83d\ude24",
+      "name": "frustrated",
+      "confidence": 30
+    },
+    "timestamp": "2025-10-04T15:17:53.633816"
   }
 ]

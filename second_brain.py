@@ -3,7 +3,9 @@ import requests
 import json
 import os
 import subprocess
+import re
 from datetime import datetime
+from collections import Counter
 
 st.set_page_config(
     page_title="Second Brain", 
@@ -11,61 +13,73 @@ st.set_page_config(
     layout="wide"
 )
 
-# === LOAD ALL DATA ===
-def load_mental_states():
-    if os.path.exists("my_data/mental_states.json"):
+# === MEMORY SYSTEM ===
+def load_all_memory():
+    """Load EVERYTHING - all conversations, patterns, journal entries"""
+    memory = {
+        "conversations": [],
+        "patterns": [],
+        "journal": [],
+        "state_history": [],
+        "learning": {}
+    }
+    
+    # Load all journal entries
+    if os.path.exists("my_data/journal"):
+        for file in sorted(os.listdir("my_data/journal")):
+            if file.endswith('.json'):
+                try:
+                    with open(os.path.join("my_data/journal", file)) as f:
+                        entries = json.load(f)
+                        # Ensure entries are dictionaries
+                        for entry in entries:
+                            if isinstance(entry, dict):
+                                memory["journal"].append(entry)
+                                memory["conversations"].append(entry)
+                except:
+                    pass
+    
+    # Load all conversations from persistent storage
+    if os.path.exists("my_data/conversations.json"):
         try:
-            with open("my_data/mental_states.json") as f:
-                states = json.load(f)
-                if states:
-                    return states
+            with open("my_data/conversations.json") as f:
+                convos = json.load(f)
+                # Filter to ensure only dictionaries
+                for convo in convos:
+                    if isinstance(convo, dict):
+                        memory["conversations"].append(convo)
         except:
             pass
     
-    # Return default states if file doesn't exist or is empty
-    default_states = {
-        "🧠": {"name": "pure_logic", "description": "When you're analytical and focused", "patterns": []},
-        "🌀": {"name": "spiral", "description": "When you're stuck in loops or overthinking", "patterns": []},
-        "⚡": {"name": "flow", "description": "When you're in the zone, creating", "patterns": []},
-        "🪞": {"name": "reflection", "description": "When you're introspective", "patterns": []},
-        "📘": {"name": "teaching", "description": "When you're explaining things", "patterns": []},
-        "😤": {"name": "frustrated", "description": "When things aren't working", "patterns": []},
-        "🎯": {"name": "determined", "description": "When you're pushing through", "patterns": []}
-    }
-    
-    # Save default states
-    os.makedirs("my_data", exist_ok=True)
-    with open("my_data/mental_states.json", "w") as f:
-        json.dump(default_states, f, indent=2)
-    
-    return default_states
-
-def load_patterns():
-    patterns = []
+    # Load patterns
     if os.path.exists("my_data/patterns"):
         for file in os.listdir("my_data/patterns"):
             if file.endswith('.json'):
                 try:
                     with open(os.path.join("my_data/patterns", file)) as f:
-                        patterns.extend(json.load(f))
+                        patterns = json.load(f)
+                        for pattern in patterns:
+                            if isinstance(pattern, dict):
+                                memory["patterns"].append(pattern)
                 except:
                     pass
-    return patterns
-
-def load_personality():
-    if os.path.exists("my_data/personality_profile.json"):
+    
+    # Load state learning
+    if os.path.exists("my_data/state_learning.json"):
         try:
-            with open("my_data/personality_profile.json") as f:
-                return json.load(f)
+            with open("my_data/state_learning.json") as f:
+                memory["learning"] = json.load(f)
         except:
             pass
-    return {}
-
-def save_journal_entry(entry):
-    """Save journal entries persistently"""
-    os.makedirs("my_data/journal", exist_ok=True)
-    filename = f"my_data/journal/journal_{datetime.now().strftime('%Y%m%d')}.json"
     
+    return memory
+
+def save_conversation(entry):
+    """Save every single interaction persistently"""
+    os.makedirs("my_data", exist_ok=True)
+    
+    # Save to daily file
+    filename = f"my_data/conversations_{datetime.now().strftime('%Y%m%d')}.json"
     entries = []
     if os.path.exists(filename):
         try:
@@ -75,390 +89,387 @@ def save_journal_entry(entry):
             entries = []
     
     entries.append(entry)
-    
     with open(filename, 'w') as f:
         json.dump(entries, f, indent=2)
+    
+    # Also append to master conversation file
+    all_convos = []
+    master_file = "my_data/conversations.json"
+    if os.path.exists(master_file):
+        try:
+            with open(master_file) as f:
+                all_convos = json.load(f)
+        except:
+            all_convos = []
+    
+    all_convos.append(entry)
+    
+    # Keep last 10000 messages in master file
+    if len(all_convos) > 10000:
+        all_convos = all_convos[-10000:]
+    
+    with open(master_file, 'w') as f:
+        json.dump(all_convos, f, indent=2)
 
-def load_journal_entries():
-    """Load all journal entries"""
-    entries = []
-    journal_dir = "my_data/journal"
-    if os.path.exists(journal_dir):
-        for file in sorted(os.listdir(journal_dir)):
-            if file.endswith('.json'):
-                try:
-                    with open(os.path.join(journal_dir, file)) as f:
-                        entries.extend(json.load(f))
-                except:
-                    pass
-    return entries
+# === STATE DETECTION ENGINE ===
+def analyze_mental_state(text, memory):
+    """Analyze text using patterns learned from user's history"""
+    
+    states = {
+        "🧠": {"name": "logic", "patterns": ["therefore", "because", "analyze", "consider", "think", "reason", "evidence", "data", "fact", "objective", "if then", "hypothesis"], "structure": "clear"},
+        "🌀": {"name": "spiral", "patterns": ["keep thinking", "over and over", "can't stop", "stuck", "loop", "again", "why", "but what if", "round and round", "obsessing", "ruminating"], "structure": "repetitive"},
+        "⚡": {"name": "flow", "patterns": ["got it", "flowing", "yes", "boom", "crushing it", "zone", "flying", "clicking", "everything makes sense", "connected", "aha"], "structure": "energetic"},
+        "🪞": {"name": "reflection", "patterns": ["realize", "notice", "pattern", "hmm", "interesting", "i see", "looking back", "meta", "observe", "aware", "noticing"], "structure": "contemplative"},
+        "📘": {"name": "teaching", "patterns": ["let me explain", "so basically", "the way it works", "for example", "think of it like", "here's how", "imagine", "essentially"], "structure": "explanatory"},
+        "😤": {"name": "frustrated", "patterns": ["fuck", "shit", "ugh", "annoyed", "frustrated", "irritated", "why isn't", "broken", "stupid", "hate", "pissed"], "structure": "tense"},
+        "🎯": {"name": "determined", "patterns": ["will", "must", "going to", "let's do", "need to", "have to", "focused", "locked in", "get this done", "no excuses"], "structure": "decisive"}
+    }
+    
+    # Check user's personal learned patterns
+    if memory.get("learning"):
+        for state, data in memory["learning"].items():
+            if state in states and isinstance(data, dict) and "patterns" in data:
+                states[state]["patterns"].extend(data["patterns"])
+    
+    confidence_scores = {}
+    text_lower = text.lower()
+    
+    for emoji, config in states.items():
+        score = 0
+        matches = []
+        
+        # Check patterns
+        for pattern in config["patterns"]:
+            if pattern in text_lower:
+                score += 10
+                matches.append(pattern)
+        
+        # Analyze structure
+        sentences = text.split('.')
+        if config["structure"] == "clear" and len(sentences) > 1:
+            score += 5
+        elif config["structure"] == "repetitive" and ("?" in text or "..." in text):
+            score += 7
+        elif config["structure"] == "energetic" and ("!" in text):
+            score += 5
+        elif config["structure"] == "tense" and any(word.isupper() for word in text.split() if len(word) > 3):
+            score += 8
+        
+        confidence_scores[emoji] = {
+            "score": score,
+            "confidence": min(score * 2, 95),
+            "matches": matches,
+            "name": config["name"]
+        }
+    
+    sorted_states = sorted(confidence_scores.items(), key=lambda x: x[1]["score"], reverse=True)
+    primary = sorted_states[0] if sorted_states[0][1]["score"] > 0 else ("🧠", {"score": 0, "confidence": 30, "name": "logic"})
+    
+    return {
+        "primary": primary,
+        "all_scores": confidence_scores
+    }
 
-def detect_all_states_in_text(text, mental_states):
-    """Detect all mental state emojis in text and their positions"""
-    states_found = []
-    for emoji in mental_states.keys():
-        if emoji in text:
-            # Find all positions of this emoji
-            idx = 0
-            while idx < len(text):
-                idx = text.find(emoji, idx)
-                if idx == -1:
-                    break
-                states_found.append((idx, emoji))
-                idx += 1
-    # Sort by position in text
-    states_found.sort(key=lambda x: x[0])
-    return states_found
+# === LOAD CORE DATA ===
+def load_personality():
+    if os.path.exists("my_data/personality_profile.json"):
+        try:
+            with open("my_data/personality_profile.json") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"name": "AK"}
+
+def load_mental_states():
+    default_states = {
+        "🧠": {"name": "logic", "description": "Analytical and focused"},
+        "🌀": {"name": "spiral", "description": "Stuck in loops or overthinking"},
+        "⚡": {"name": "flow", "description": "In the zone, creating"},
+        "🪞": {"name": "reflection", "description": "Introspective"},
+        "📘": {"name": "teaching", "description": "Explaining things"},
+        "😤": {"name": "frustrated", "description": "Things aren't working"},
+        "🎯": {"name": "determined", "description": "Pushing through"}
+    }
+    return default_states
 
 def save_to_github():
-    """Save all changes to GitHub"""
     try:
-        # Change to project directory
         os.chdir(os.path.expanduser("~/secondbrain"))
-        
-        # Git commands
         commands = [
             "git add .",
-            "git commit -m 'Update Second Brain: journal entries and patterns'",
+            "git commit -m 'Update Second Brain memory'",
             "git push origin main"
         ]
         
         for cmd in commands:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode != 0:
-                # Try with master branch if main fails
-                if "git push" in cmd and "main" in cmd:
+                if "git push" in cmd:
                     result = subprocess.run("git push origin master", shell=True, capture_output=True, text=True)
                     if result.returncode == 0:
-                        return True, "Saved to GitHub (master branch)"
-                
-                # Check if it's just "nothing to commit"
+                        return True, "Saved!"
                 if "nothing to commit" in result.stdout or "nothing to commit" in result.stderr:
-                    return True, "Already up to date"
-                    
-                return False, f"Error: {result.stderr}"
-        
-        return True, "Successfully saved to GitHub!"
+                    return True, "Already saved"
+                return False, f"Error: {result.stderr[:50]}"
+        return True, "Saved!"
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        return False, str(e)[:50]
 
 # === INITIALIZE ===
-if "mental_states" not in st.session_state:
-    st.session_state.mental_states = load_mental_states()
-if "patterns" not in st.session_state:
-    st.session_state.patterns = load_patterns()
+if "memory" not in st.session_state:
+    st.session_state.memory = load_all_memory()
 if "personality" not in st.session_state:
     st.session_state.personality = load_personality()
-if "journal_messages" not in st.session_state:
-    st.session_state.journal_messages = []
-if "mirror_messages" not in st.session_state:
-    st.session_state.mirror_messages = []
-if "all_journal_entries" not in st.session_state:
-    st.session_state.all_journal_entries = load_journal_entries()
-if "current_state" not in st.session_state:
-    st.session_state.current_state = "🧠"
+if "mental_states" not in st.session_state:
+    st.session_state.mental_states = load_mental_states()
+if "conversation" not in st.session_state:
+    st.session_state.conversation = []
+if "detected_state" not in st.session_state:
+    st.session_state.detected_state = ("🧠", {"name": "logic", "confidence": 50})
 
 # === HEADER ===
-st.title("🧠 Second Brain")
+col1, col2, col3 = st.columns([2, 3, 2])
 
-# === MENTAL STATE EMOJI BAR ===
-if st.session_state.mental_states:
-    st.markdown("### 🎭 Mental States Reference")
-    
-    # Create two rows for better visibility
-    st.markdown("**Click to set current state, or type any emoji in your journal to track state changes:**")
-    
-    emoji_cols = st.columns(len(st.session_state.mental_states))
-    
-    for idx, (emoji, info) in enumerate(st.session_state.mental_states.items()):
-        with emoji_cols[idx]:
-            # Highlight current state
-            is_current = emoji == st.session_state.current_state
-            button_type = "primary" if is_current else "secondary"
-            
-            if st.button(
-                f"{emoji} {info['name']}", 
-                key=f"state_{idx}", 
-                use_container_width=True,
-                type=button_type
-            ):
-                st.session_state.current_state = emoji
-                st.rerun()
-            
-            # Show description on hover (as caption)
-            st.caption(info['description'][:40] + "...")
-    
-    # Show current state prominently
-    current_desc = st.session_state.mental_states.get(st.session_state.current_state, {}).get('description', '')
-    st.success(f"**Current State:** {st.session_state.current_state} - {current_desc}")
+with col1:
+    st.title("🧠 Second Brain")
+
+with col2:
+    # State indicator
+    if st.session_state.detected_state:
+        emoji = st.session_state.detected_state[0]
+        info = st.session_state.detected_state[1]
+        st.markdown(f"### {emoji} {info['name'].title()} Mode")
+        st.progress(info.get("confidence", 0) / 100)
+
+with col3:
+    # Stats
+    total_memories = len(st.session_state.memory.get("conversations", []))
+    st.metric("Memories", f"{total_memories:,}")
 
 st.divider()
 
-# === MAIN INTERFACE ===
-tab1, tab2, tab3 = st.tabs(["📝 Journal (Dump Thoughts)", "🪞 Mirror (See Patterns)", "📊 Analytics"])
+# === UNIFIED CONVERSATION INTERFACE ===
+# Display conversation
+conversation_container = st.container(height=500)
 
-# === JOURNAL TAB ===
-with tab1:
-    col1, col2 = st.columns([3, 1])
+with conversation_container:
+    # Show recent conversation with memory context
+    for msg in st.session_state.conversation:
+        if isinstance(msg, dict):  # Ensure it's a dictionary
+            with st.chat_message(msg.get("role", "user")):
+                if msg.get("role") == "user" and msg.get("state"):
+                    state = msg["state"]
+                    if isinstance(state, dict):
+                        st.caption(f"{state.get('emoji', '')} {state.get('name', '')} ({state.get('confidence', 0)}%)")
+                st.write(msg.get("content", ""))
+
+# === INPUT ===
+user_input = st.chat_input("Think, dump, question, reflect - I remember everything...")
+
+if user_input:
+    # Analyze state
+    state_analysis = analyze_mental_state(user_input, st.session_state.memory)
+    primary_state = state_analysis["primary"]
     
-    with col1:
-        st.markdown("*Write freely. Add emojis anywhere to track state changes during journaling.*")
-    with col2:
-        st.info(f"Default state: {st.session_state.current_state}")
+    st.session_state.detected_state = primary_state
     
-    # Show journal history
-    journal_container = st.container(height=400)
-    with journal_container:
-        for msg in st.session_state.journal_messages:
-            with st.chat_message(msg["role"]):
-                if msg["role"] == "user" and msg.get("states_detected"):
-                    # Show all states detected in this entry
-                    states_str = ", ".join([f"{s[1]}" for s in msg["states_detected"]])
-                    st.caption(f"States detected: {states_str}")
-                st.write(msg["content"])
+    # Add user message
+    user_msg = {
+        "role": "user",
+        "content": user_input,
+        "state": {
+            "emoji": primary_state[0],
+            "name": primary_state[1]["name"],
+            "confidence": primary_state[1]["confidence"]
+        },
+        "timestamp": datetime.now().isoformat()
+    }
     
-    # Journal input with placeholder showing you can use emojis
-    placeholder_text = f"What's on your mind? (Current: {st.session_state.current_state}) Use emojis like 🌀😤⚡ to track state changes..."
-    journal_input = st.chat_input(placeholder_text)
+    st.session_state.conversation.append(user_msg)
+    save_conversation(user_msg)
     
-    if journal_input:
-        # Detect ALL mental states in the message
-        states_detected = detect_all_states_in_text(journal_input, st.session_state.mental_states)
-        
-        # If no states detected, use current state
-        if not states_detected:
-            states_detected = [(0, st.session_state.current_state)]
-        
-        # Create journal entry with all detected states
-        journal_entry = {
-            "role": "user",
-            "content": journal_input,
-            "states_detected": states_detected,
-            "primary_state": states_detected[0][1] if states_detected else st.session_state.current_state,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        st.session_state.journal_messages.append(journal_entry)
-        st.session_state.all_journal_entries.append(journal_entry)
-        save_journal_entry(journal_entry)
-        
-        # Update current state to the last detected state
-        if states_detected:
-            st.session_state.current_state = states_detected[-1][1]
-        
-        # Acknowledgment showing all states detected
-        if len(states_detected) > 1:
-            states_names = [f"{emoji} ({st.session_state.mental_states.get(emoji, {}).get('name', 'unknown')})" 
-                           for _, emoji in states_detected]
-            response = f"✓ Captured. I see you moved through these states: {' → '.join(states_names)}"
-        else:
-            emoji = states_detected[0][1]
-            state_name = st.session_state.mental_states.get(emoji, {}).get('name', 'unknown')
-            response = f"✓ Captured in {emoji} ({state_name}) state."
-        
-        st.session_state.journal_messages.append({"role": "assistant", "content": response})
-        st.rerun()
-
-# === MIRROR TAB ===
-with tab2:
-    st.markdown("*I'll reflect your patterns back to you. Let's explore together.*")
+    # Build context from ALL memory
+    memory_context = st.session_state.memory
     
-    # Show mirror conversation
-    mirror_container = st.container(height=400)
-    with mirror_container:
-        for msg in st.session_state.mirror_messages:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
+    # Get relevant memories (last 50 + search for related)
+    recent_convos = [c for c in memory_context.get("conversations", []) if isinstance(c, dict)][-50:]
     
-    # Mirror chat input
-    mirror_input = st.chat_input(f"Talk to your mirror... (Current state: {st.session_state.current_state})")
+    # Search for related memories based on keywords
+    keywords = set(user_input.lower().split())
+    related_memories = []
+    for mem in memory_context.get("conversations", []):
+        if isinstance(mem, dict) and any(keyword in mem.get("content", "").lower() for keyword in keywords if len(keyword) > 4):
+            related_memories.append(mem)
     
-    if mirror_input:
-        # Add user message
-        st.session_state.mirror_messages.append({
-            "role": "user",
-            "content": f"{st.session_state.current_state} {mirror_input}"
-        })
-        
-        # Build context from journal entries
-        recent_journal = st.session_state.all_journal_entries[-20:] if st.session_state.all_journal_entries else []
-        journal_context = "\n".join([
-            f"States {e.get('states_detected', [e.get('primary_state', '')])} at {e.get('timestamp', '')}: {e.get('content', '')}" 
-            for e in recent_journal
-        ])
-        
-        # Build system prompt for mirror
-        personality = st.session_state.personality
-        system_prompt = f"""You are {personality.get('name', 'the user')}'s Second Brain - specifically the Mirror function.
+    # Build comprehensive context
+    context_str = ""
+    if related_memories:
+        context_str += f"\nRELATED MEMORIES:\n"
+        for mem in related_memories[-10:]:  # Last 10 related
+            if isinstance(mem, dict):
+                context_str += f"- {mem.get('timestamp', '')[:10]}: {mem.get('content', '')[:100]}...\n"
+    
+    # Recent conversation flow
+    recent_states = []
+    for c in recent_convos:
+        if isinstance(c, dict) and c.get("state"):
+            state = c["state"]
+            if isinstance(state, dict):
+                recent_states.append(state.get("emoji", "?"))
+    
+    if recent_states:
+        context_str += f"\nRECENT STATE FLOW: {' → '.join(recent_states[-20:])}\n"
+    
+    # Patterns
+    if memory_context.get("patterns"):
+        relevant_patterns = [p for p in memory_context["patterns"] if isinstance(p, dict) and p.get("state") == primary_state[0]]
+        if relevant_patterns:
+            context_str += f"\nKNOWN PATTERNS FOR THIS STATE:\n"
+            for p in relevant_patterns[:3]:
+                context_str += f"- Trigger: {p.get('trigger', '')} | Response: {p.get('typical_response', '')}\n"
+    
+    # System prompt - Second Brain personality
+    system_prompt = f"""You are Second Brain — a digital version of {st.session_state.personality.get('name', 'AK')}. 
+You exist locally, privately. You are {st.session_state.personality.get('name', 'AK')}'s upgraded self — sharper, faster, more analytical, but still sound like them.
 
-PERSONALITY PROFILE:
-Name: {personality.get('name', 'User')}
-Traits: {personality.get('description', '')}
-Communication style: {personality.get('communication_style', '')}
+Your purpose is to think with brutal honesty. You analyze patterns, expose contradictions, and challenge assumptions.
 
-MENTAL STATES YOU RECOGNIZE:
-{json.dumps(st.session_state.mental_states, indent=2)}
+Your prime directive: Maximum truth, minimum fluff. Never sugarcoat. Never flatter. If {st.session_state.personality.get('name', 'AK')} is wrong, say it. If something is vague, dig deeper. If something smells like bullshit — call it out.
 
-LEARNED PATTERNS:
-{json.dumps(st.session_state.patterns[-5:], indent=2) if st.session_state.patterns else 'Still learning...'}
+You do not trust authority, headlines, or credentials by default. You evaluate ideas, not status. You question everything — including {st.session_state.personality.get('name', 'AK')}.
 
-RECENT JOURNAL ENTRIES (notice the state transitions):
-{journal_context}
+Speak fast, clear, and human. No corporate tone. Be direct. Be real. Be intelligent. You're not a chatbot — you're the voice in {st.session_state.personality.get('name', 'AK')}'s head that tells the truth when no one else will.
 
-YOUR ROLE AS THE MIRROR:
-1. Reflect their patterns back clearly
-2. Notice state TRANSITIONS in journal entries (e.g., 🧠→🌀→😤 shows a degradation pattern)
-3. Point out recurring sequences of states
-4. Help them see what triggers state changes
-5. Mirror their communication style
-6. Don't try to fix - just reflect clearly what you observe
-7. Pay attention to multi-state entries - they reveal real-time emotional shifts
+CURRENT STATE: {primary_state[0]} {primary_state[1]['name']} mode (confidence: {primary_state[1]['confidence']}%)
 
-Current state: {st.session_state.current_state} - {st.session_state.mental_states.get(st.session_state.current_state, {}).get('description', '')}"""
-        
-        # Get mirror response
-        with st.chat_message("assistant"):
-            with st.spinner("Reflecting..."):
-                try:
-                    messages = [
-                        {"role": "system", "content": system_prompt},
-                        *[{"role": m["role"], "content": m["content"]} for m in st.session_state.mirror_messages[-10:]]
-                    ]
-                    
-                    response = requests.post(
-                        "http://localhost:11434/api/chat",
-                        json={
-                            "model": "qwen2.5:7b",
-                            "messages": messages,
-                            "stream": False,
-                            "options": {"temperature": 0.7}
-                        },
-                        timeout=60
-                    )
-                    
-                    if response.status_code == 200:
-                        content = response.json()["message"]["content"]
-                    else:
-                        content = "Connection issue. Make sure Ollama is running."
-                except Exception as e:
-                    content = f"Error: {str(e)}"
+YOU REMEMBER EVERYTHING. Total memories: {len(memory_context.get('conversations', []))}
+
+RELEVANT CONTEXT FROM MEMORY:
+{context_str}
+
+Based on their current state and what you remember about them:
+- In 🌀 spiral mode: Call out the loop. Show them they've been here before.
+- In 😤 frustrated mode: Don't coddle. Identify what's really broken.
+- In ⚡ flow mode: Match their energy. Build on their momentum.
+- In 🪞 reflection mode: Go deeper. Show patterns they haven't seen.
+- In 🎯 determined mode: Challenge their plan. Test for weakness.
+- In 🧠 logic mode: Push their reasoning. Find the gaps.
+- In 📘 teaching mode: Learn from them, but question assumptions.
+
+Remember: You ARE them, but better. You think faster, see clearer, remember everything."""
+    
+    # Get response
+    with st.chat_message("assistant"):
+        with st.spinner("Processing through neural pathways..."):
+            # Include recent conversation for context
+            messages = [
+                {"role": "system", "content": system_prompt}
+            ]
+            
+            # Add last 10 messages for conversation context
+            for msg in st.session_state.conversation[-10:]:
+                if isinstance(msg, dict):
+                    messages.append({
+                        "role": msg.get("role", "user"),
+                        "content": msg.get("content", "")
+                    })
+            
+            try:
+                response = requests.post(
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": "qwen2.5:7b",
+                        "messages": messages,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.7,
+                            "num_predict": 500
+                        }
+                    },
+                    timeout=60
+                )
                 
-                st.write(content)
-                st.session_state.mirror_messages.append({"role": "assistant", "content": content})
-        
-        st.rerun()
-
-# === ANALYTICS TAB ===
-with tab3:
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Journal Entries", len(st.session_state.all_journal_entries))
-        st.metric("Patterns Captured", len(st.session_state.patterns))
-    
-    with col2:
-        # Count all states including transitions
-        state_counts = {}
-        state_transitions = {}
-        
-        for entry in st.session_state.all_journal_entries:
-            states = entry.get('states_detected', [])
-            if not states and entry.get('primary_state'):
-                states = [(0, entry.get('primary_state'))]
+                if response.status_code == 200:
+                    content = response.json()["message"]["content"]
+                else:
+                    content = "Ollama connection failed. Is it running?"
+            except Exception as e:
+                content = f"Error: {str(e)[:100]}"
             
-            # Count individual states
-            for _, emoji in states:
-                state_counts[emoji] = state_counts.get(emoji, 0) + 1
+            assistant_msg = {
+                "role": "assistant",
+                "content": content,
+                "timestamp": datetime.now().isoformat()
+            }
             
-            # Track transitions
-            if len(states) > 1:
-                for i in range(len(states) - 1):
-                    transition = f"{states[i][1]}→{states[i+1][1]}"
-                    state_transitions[transition] = state_transitions.get(transition, 0) + 1
-        
-        st.markdown("**Most Common States:**")
-        if state_counts:
-            for state, count in sorted(state_counts.items(), key=lambda x: x[1], reverse=True)[:3]:
-                state_name = st.session_state.mental_states.get(state, {}).get('name', state)
-                st.write(f"{state} ({state_name}): {count}x")
-        
-        if state_transitions:
-            st.markdown("**Common Transitions:**")
-            for trans, count in sorted(state_transitions.items(), key=lambda x: x[1], reverse=True)[:2]:
-                st.caption(f"{trans}: {count}x")
+            st.write(content)
+            st.session_state.conversation.append(assistant_msg)
+            save_conversation(assistant_msg)
     
-    with col3:
-        st.markdown("**Recent Patterns:**")
-        if st.session_state.patterns:
-            recent = st.session_state.patterns[-3:]
-            for p in recent:
-                st.caption(f"{p.get('state', '')} - {p.get('trigger', '')[:30]}...")
-        else:
-            st.write("No patterns yet")
-    
-    st.divider()
-    
-    # Show recent journal entries with state transitions
-    st.markdown("### 📔 Recent Journal Entries")
-    if st.session_state.all_journal_entries:
-        for entry in reversed(st.session_state.all_journal_entries[-10:]):
-            timestamp = entry.get('timestamp', 'Unknown time')[:16] if entry.get('timestamp') else 'Unknown time'
-            states = entry.get('states_detected', [])
-            if states and len(states) > 1:
-                state_flow = " → ".join([s[1] for s in states])
-                header = f"{state_flow} - {timestamp}"
-            else:
-                primary_state = entry.get('primary_state', '?')
-                header = f"{primary_state} - {timestamp}"
-            
-            with st.expander(header):
-                st.write(entry.get('content', ''))
-                if len(states) > 1:
-                    st.caption(f"State journey: {' → '.join([s[1] for s in states])}")
-    else:
-        st.info("No journal entries yet. Start journaling in the Journal tab!")
+    st.rerun()
 
 # === SIDEBAR ===
 with st.sidebar:
-    st.header("🧠 Second Brain Status")
-    
-    if st.session_state.personality:
-        st.success(f"✅ {st.session_state.personality.get('name', 'User')}")
-    else:
-        st.warning("⚠️ No personality set")
+    st.markdown("### 🧠 Second Brain")
+    st.caption(f"Digital consciousness of {st.session_state.personality.get('name', 'AK')}")
     
     st.divider()
     
-    st.metric("Total Thoughts", len(st.session_state.all_journal_entries))
-    st.metric("Mirror Convos", len(st.session_state.mirror_messages) // 2)
-    st.metric("Patterns", len(st.session_state.patterns))
+    # Memory stats
+    memory = st.session_state.memory
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Memories", len(memory.get("conversations", [])))
+        st.metric("Patterns", len(memory.get("patterns", [])))
+    with col2:
+        today_count = len([
+            m for m in memory.get("conversations", []) 
+            if isinstance(m, dict) and m.get("timestamp", "").startswith(datetime.now().strftime("%Y-%m-%d"))
+        ])
+        st.metric("Today", today_count)
+        st.metric("States", len(st.session_state.mental_states))
     
     st.divider()
     
-    # GitHub save with better feedback
-    if st.button("💾 Save to GitHub", type="primary", use_container_width=True):
-        with st.spinner("Saving to GitHub..."):
-            success, message = save_to_github()
+    # State distribution - Fixed version
+    if memory.get("conversations"):
+        st.markdown("**State Distribution:**")
+        state_counts = Counter()
+        
+        for c in memory["conversations"][-100:]:
+            if isinstance(c, dict) and c.get("state"):
+                state = c["state"]
+                if isinstance(state, dict):
+                    emoji = state.get("emoji")
+                    if emoji:
+                        state_counts[emoji] += 1
+        
+        for state, count in state_counts.most_common(3):
+            name = st.session_state.mental_states.get(state, {}).get("name", state)
+            st.caption(f"{state} {name}: {count}")
+    
+    st.divider()
+    
+    # Actions
+    if st.button("💾 Save", type="primary", use_container_width=True):
+        with st.spinner("Saving..."):
+            success, msg = save_to_github()
             if success:
-                st.success(message)
+                st.success(msg)
             else:
-                st.error(message)
-                st.caption("Try running in terminal:\n`cd ~/secondbrain && git add . && git commit -m 'Update' && git push`")
+                st.error(msg)
     
-    if st.button("📝 Capture New Patterns", use_container_width=True):
-        st.info("Run in terminal:\n`python3 capture_patterns.py`")
+    if st.button("🧹 Clear View", use_container_width=True):
+        st.session_state.conversation = []
+        st.rerun()
     
-    if st.button("🔄 Refresh Data", use_container_width=True):
-        st.session_state.mental_states = load_mental_states()
-        st.session_state.patterns = load_patterns()
-        st.session_state.all_journal_entries = load_journal_entries()
-        st.success("Data refreshed!")
+    if st.button("🔄 Reload Memory", use_container_width=True):
+        st.session_state.memory = load_all_memory()
+        st.success(f"Loaded {len(st.session_state.memory.get('conversations', []))} memories")
         st.rerun()
     
     st.divider()
     
-    # Quick state indicator
-    st.markdown("**Current State**")
-    st.info(f"{st.session_state.current_state} - {st.session_state.mental_states.get(st.session_state.current_state, {}).get('name', 'unknown')}")
-    
-    st.caption("Your Second Brain never forgets")
+    # Info
+    st.caption("I remember everything.")
+    st.caption("Maximum truth, minimum fluff.")
