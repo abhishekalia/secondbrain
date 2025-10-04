@@ -22,5 +22,33 @@
     ],
     "primary_state": "\ud83c\udfaf",
     "timestamp": "2025-10-04T11:18:09.155875"
+  },
+  {
+    "role": "user",
+    "content": "\ud83e\udde0 Started working on the project clearly, but then \ud83c\udf00 got stuck overthinking the architecture. \ud83d\ude24 Frustrated that I'm not making progress. Taking a break. Came back and \ud83c\udfaf just decided to build something simple first. Now I'm \u26a1 flowing!\"",
+    "states_detected": [
+      [
+        0,
+        "\ud83e\udde0"
+      ],
+      [
+        51,
+        "\ud83c\udf00"
+      ],
+      [
+        94,
+        "\ud83d\ude24"
+      ],
+      [
+        167,
+        "\ud83c\udfaf"
+      ],
+      [
+        223,
+        "\u26a1"
+      ]
+    ],
+    "primary_state": "\ud83e\udde0",
+    "timestamp": "2025-10-04T11:20:32.513759"
   }
 ]
