@@ -1,0 +1,37 @@
+{
+  "🧠": {
+    "name": "pure_logic",
+    "description": "When you're analytical and focused",
+    "patterns": []
+  },
+  "🌀": {
+    "name": "spiral",
+    "description": "When you're stuck in loops or overthinking",
+    "patterns": []
+  },
+  "⚡": {
+    "name": "flow",
+    "description": "When you're in the zone, creating",
+    "patterns": []
+  },
+  "🪞": {
+    "name": "reflection",
+    "description": "When you're introspective",
+    "patterns": []
+  },
+  "📘": {
+    "name": "teaching",
+    "description": "When you're explaining things",
+    "patterns": []
+  },
+  "😤": {
+    "name": "frustrated",
+    "description": "When things aren't working",
+    "patterns": []
+  },
+  "🎯": {
+    "name": "determined",
+    "description": "When you're pushing through",
+    "patterns": []
+  }
+}
