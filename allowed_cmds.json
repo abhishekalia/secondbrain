@@ -1,9 +1,0 @@
-{
-  "whitelist": [
-    "ls",
-    "cat",
-    "echo",
-    "python3 --version"
-  ],
-  "blocked": ["rm -rf", "shutdown", "curl http", "scp", "ssh"]
-}

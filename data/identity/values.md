@@ -1,3 +1,0 @@
-- Speed • Integrity • Impact
-- Loyalty to people and craft
-- Clarity over comfort

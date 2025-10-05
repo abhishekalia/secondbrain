@@ -1,4 +1,0 @@
-- Creativity and systems can coexist; build both.
-- Freedom, purpose, curiosity guide decisions.
-- Act quickly; test and adjust; momentum over paralysis.
-- Take calculated bets; avoid blind risks.
