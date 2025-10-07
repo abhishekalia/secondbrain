@@ -6,7 +6,6 @@ import subprocess
 import re
 from datetime import datetime
 from collections import Counter
-from auto_pattern_extractor import PatternExtractor
 
 st.set_page_config(
     page_title="Second Brain", 
@@ -32,6 +31,7 @@ def load_all_memory():
                 try:
                     with open(os.path.join("my_data/journal", file)) as f:
                         entries = json.load(f)
+                        # Ensure entries are dictionaries
                         for entry in entries:
                             if isinstance(entry, dict):
                                 memory["journal"].append(entry)
@@ -44,25 +44,23 @@ def load_all_memory():
         try:
             with open("my_data/conversations.json") as f:
                 convos = json.load(f)
+                # Filter to ensure only dictionaries
                 for convo in convos:
                     if isinstance(convo, dict):
                         memory["conversations"].append(convo)
         except:
             pass
     
-    # Load patterns (including auto-extracted)
+    # Load patterns
     if os.path.exists("my_data/patterns"):
         for file in os.listdir("my_data/patterns"):
             if file.endswith('.json'):
                 try:
                     with open(os.path.join("my_data/patterns", file)) as f:
-                        data = json.load(f)
-                        # Handle both old manual patterns and new auto-extracted reports
-                        if isinstance(data, list):
-                            memory["patterns"].extend([p for p in data if isinstance(p, dict)])
-                        elif isinstance(data, dict) and "analysis" in data:
-                            # This is an auto-extracted pattern report
-                            memory["patterns"].append(data)
+                        patterns = json.load(f)
+                        for pattern in patterns:
+                            if isinstance(pattern, dict):
+                                memory["patterns"].append(pattern)
                 except:
                     pass
     
@@ -110,47 +108,8 @@ def save_conversation(entry):
     if len(all_convos) > 10000:
         all_convos = all_convos[-10000:]
     
-    # AUTO-PATTERN EXTRACTION: Run every 10 conversations (but only once)
-    if len(all_convos) % 10 == 0 and len(all_convos) > 0:
-        # Check if we already extracted for this batch
-        last_extract_count = st.session_state.get("last_pattern_extract", 0)
-        if len(all_convos) != last_extract_count:
-            st.session_state.last_pattern_extract = len(all_convos)
-            try:
-                extractor = PatternExtractor()
-                extractor.generate_pattern_report()
-                # Reload memory to get new patterns
-                st.session_state.memory = load_all_memory()
-            except Exception as e:
-                print(f"Pattern extraction failed: {e}")
-    
-    # AUTO-PATTERN EXTRACTION: Run every 10 conversations
-    if len(all_convos) % 10 == 0:
-        try:
-            extractor = PatternExtractor()
-            extractor.generate_pattern_report()
-            # Reload memory to get new patterns
-            st.session_state.memory = load_all_memory()
-        except Exception as e:
-            print(f"Pattern extraction failed: {e}")
-
-def get_latest_patterns():
-    """Get the most recent auto-extracted pattern report"""
-    pattern_dir = "my_data/patterns"
-    if not os.path.exists(pattern_dir):
-        return None
-    
-    pattern_files = [f for f in os.listdir(pattern_dir) if f.startswith("auto_extracted_")]
-    if not pattern_files:
-        return None
-    
-    latest = sorted(pattern_files)[-1]
-    
-    try:
-        with open(os.path.join(pattern_dir, latest)) as f:
-            return json.load(f)
-    except:
-        return None
+    with open(master_file, 'w') as f:
+        json.dump(all_convos, f, indent=2)
 
 # === STATE DETECTION ENGINE ===
 def analyze_mental_state(text, memory):
@@ -296,7 +255,7 @@ conversation_container = st.container(height=500)
 with conversation_container:
     # Show recent conversation with memory context
     for msg in st.session_state.conversation:
-        if isinstance(msg, dict):
+        if isinstance(msg, dict):  # Ensure it's a dictionary
             with st.chat_message(msg.get("role", "user")):
                 if msg.get("role") == "user" and msg.get("state"):
                     state = msg["state"]
@@ -346,7 +305,7 @@ if user_input:
     context_str = ""
     if related_memories:
         context_str += f"\nRELATED MEMORIES:\n"
-        for mem in related_memories[-10:]:
+        for mem in related_memories[-10:]:  # Last 10 related
             if isinstance(mem, dict):
                 context_str += f"- {mem.get('timestamp', '')[:10]}: {mem.get('content', '')[:100]}...\n"
     
@@ -361,23 +320,13 @@ if user_input:
     if recent_states:
         context_str += f"\nRECENT STATE FLOW: {' → '.join(recent_states[-20:])}\n"
     
-    # Add auto-extracted patterns
-    latest_patterns = get_latest_patterns()
-    if latest_patterns and "analysis" in latest_patterns:
-        analysis = latest_patterns["analysis"]
-        
-        # Add language patterns for current state
-        lang_patterns = analysis.get("language_fingerprints", {}).get(primary_state[0], {})
-        if lang_patterns:
-            context_str += f"\nYOUR LANGUAGE IN THIS STATE: {', '.join(lang_patterns.get('top_words', [])[:5])}\n"
-        
-        # Add time context
-        current_hour = datetime.now().hour
-        time_patterns = analysis.get("time_patterns", {}).get(primary_state[0], {})
-        if time_patterns:
-            peak_hours = time_patterns.get("peak_hours", [])
-            if current_hour in peak_hours:
-                context_str += f"\nTIME INSIGHT: You're usually in {primary_state[1]['name']} mode at this hour\n"
+    # Patterns
+    if memory_context.get("patterns"):
+        relevant_patterns = [p for p in memory_context["patterns"] if isinstance(p, dict) and p.get("state") == primary_state[0]]
+        if relevant_patterns:
+            context_str += f"\nKNOWN PATTERNS FOR THIS STATE:\n"
+            for p in relevant_patterns[:3]:
+                context_str += f"- Trigger: {p.get('trigger', '')} | Response: {p.get('typical_response', '')}\n"
     
     # System prompt - Second Brain personality
     system_prompt = f"""You are Second Brain — a digital version of {st.session_state.personality.get('name', 'AK')}. 
@@ -482,33 +431,7 @@ with st.sidebar:
     
     st.divider()
     
-    # Latest pattern insights
-    latest_patterns = get_latest_patterns()
-    if latest_patterns and "analysis" in latest_patterns:
-        st.markdown("**🔍 Latest Insights:**")
-        analysis = latest_patterns["analysis"]
-        
-        # Show top transitions
-        transitions = analysis.get("state_transitions", {}).get("patterns", {})
-        if transitions:
-            st.caption("Top state transitions:")
-            for trans, data in list(transitions.items())[:2]:
-                st.caption(f"• {trans} ({data['confidence']:.0f}%)")
-        
-        # Show loops if detected
-        loops = analysis.get("loops_detected", {}).get("total", 0)
-        if loops > 0:
-            st.warning(f"🌀 {loops} spiral loops detected")
-        
-        # Show stated beliefs
-        beliefs = analysis.get("stated_beliefs", [])
-        if beliefs:
-            st.caption("Tracking belief:")
-            st.caption(f"• {beliefs[0].get('claim', '')[:40]}...")
-    
-    st.divider()
-    
-    # State distribution
+    # State distribution - Fixed version
     if memory.get("conversations"):
         st.markdown("**State Distribution:**")
         state_counts = Counter()
@@ -536,17 +459,6 @@ with st.sidebar:
             else:
                 st.error(msg)
     
-    if st.button("🔄 Extract Patterns Now", use_container_width=True):
-        with st.spinner("Analyzing patterns..."):
-            try:
-                extractor = PatternExtractor()
-                extractor.generate_pattern_report()
-                st.session_state.memory = load_all_memory()
-                st.success("Patterns extracted!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {str(e)[:50]}")
-    
     if st.button("🧹 Clear View", use_container_width=True):
         st.session_state.conversation = []
         st.rerun()
@@ -561,4 +473,3 @@ with st.sidebar:
     # Info
     st.caption("I remember everything.")
     st.caption("Maximum truth, minimum fluff.")
-    st.caption(f"Next auto-extract: {10 - (len(memory.get('conversations', [])) % 10)} conversations")
