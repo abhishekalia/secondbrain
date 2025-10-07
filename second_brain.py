@@ -80,6 +80,38 @@ def save_conversation(entry):
     """Save every single interaction persistently"""
     os.makedirs("my_data", exist_ok=True)
     
+    # Only save to master file - no more daily files
+    master_file = "my_data/conversations.json"
+    all_convos = []
+    
+    if os.path.exists(master_file):
+        try:
+            with open(master_file) as f:
+                all_convos = json.load(f)
+        except:
+            all_convos = []
+    
+    all_convos.append(entry)
+    
+    # Keep last 10000 messages
+    if len(all_convos) > 10000:
+        all_convos = all_convos[-10000:]
+    
+    with open(master_file, 'w') as f:
+        json.dump(all_convos, f, indent=2)
+    
+    # AUTO-PATTERN EXTRACTION: Run every 10 conversations (but only once)
+    if len(all_convos) % 10 == 0 and len(all_convos) > 0:
+        last_extract_count = st.session_state.get("last_pattern_extract", 0)
+        if len(all_convos) != last_extract_count:
+            st.session_state.last_pattern_extract = len(all_convos)
+            try:
+                extractor = PatternExtractor()
+                extractor.generate_pattern_report()
+                st.session_state.memory = load_all_memory()
+            except Exception as e:
+                print(f"Pattern extraction failed: {e}")
+    
     # Save to daily file
     filename = f"my_data/conversations_{datetime.now().strftime('%Y%m%d')}.json"
     entries = []
@@ -500,11 +532,21 @@ with st.sidebar:
         if loops > 0:
             st.warning(f"🌀 {loops} spiral loops detected")
         
-        # Show stated beliefs
+        # Show stated beliefs - rotate through them
         beliefs = analysis.get("stated_beliefs", [])
         if beliefs:
-            st.caption("Tracking belief:")
-            st.caption(f"• {beliefs[0].get('claim', '')[:40]}...")
+            st.caption("**Beliefs tracked:**")
+            # Show up to 3 unique beliefs
+            unique_beliefs = []
+            seen = set()
+            for b in beliefs:
+                claim = b.get('claim', '')
+                if claim not in seen and len(unique_beliefs) < 3:
+                    unique_beliefs.append(claim)
+                    seen.add(claim)
+            
+            for belief in unique_beliefs:
+                st.caption(f"• {belief[:60]}...")
     
     st.divider()
     
