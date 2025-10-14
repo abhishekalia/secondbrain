@@ -4,6 +4,9 @@ import json
 import os
 import subprocess
 import re
+import pandas as pd
+import altair as alt
+from collections import defaultdict
 from datetime import datetime
 from collections import Counter
 from auto_pattern_extractor import PatternExtractor
@@ -241,6 +244,135 @@ def analyze_mental_state(text, memory):
     return {
         "primary": primary,
         "all_scores": confidence_scores
+    }
+
+def create_state_timeline(conversations, days=7):
+    """Create visual timeline of mental states over last N days"""
+    from datetime import timedelta
+    
+    # Filter to last N days
+    cutoff = datetime.now() - timedelta(days=days)
+    recent = []
+    
+    for conv in conversations:
+        if not isinstance(conv, dict):
+            continue
+        
+        timestamp = conv.get("timestamp", "")
+        state = conv.get("state", {})
+        
+        if not timestamp or not isinstance(state, dict):
+            continue
+        
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            if dt >= cutoff:
+                recent.append({
+                    "timestamp": dt,
+                    "state": state.get("emoji", "?"),
+                    "state_name": state.get("name", "unknown"),
+                    "confidence": state.get("confidence", 0)
+                })
+        except:
+            continue
+    
+    if not recent:
+        return None
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(recent)
+    
+    # Create state mapping for colors
+    state_colors = {
+        "🧠": "#3498db",  # Blue - Logic
+        "🌀": "#e74c3c",  # Red - Spiral
+        "⚡": "#f1c40f",  # Yellow - Flow
+        "🪞": "#9b59b6",  # Purple - Reflection
+        "📘": "#1abc9c",  # Teal - Teaching
+        "😤": "#e67e22",  # Orange - Frustrated
+        "🎯": "#2ecc71",  # Green - Determined
+    }
+    
+    # Map states to colors
+    df["color"] = df["state"].map(state_colors)
+    df["state_display"] = df["state"] + " " + df["state_name"]
+    
+    # Create timeline chart
+    chart = alt.Chart(df).mark_circle(size=100).encode(
+        x=alt.X('timestamp:T', 
+                title='Time',
+                axis=alt.Axis(format='%b %d %H:%M')),
+        y=alt.Y('state_display:N', 
+                title='Mental State',
+                sort=list(state_colors.keys())),
+        color=alt.Color('state:N',
+                       scale=alt.Scale(
+                           domain=list(state_colors.keys()),
+                           range=list(state_colors.values())
+                       ),
+                       legend=None),
+        size=alt.Size('confidence:Q', 
+                     scale=alt.Scale(range=[50, 200]),
+                     legend=alt.Legend(title='Confidence')),
+        tooltip=['timestamp:T', 'state_display:N', 'confidence:Q']
+    ).properties(
+        width=600,
+        height=300,
+        title=f'Mental State Timeline (Last {days} Days)'
+    ).interactive()
+    
+    return chart
+
+
+def get_state_stats(conversations, days=7):
+    """Get statistics about state distribution"""
+    from datetime import timedelta
+    
+    cutoff = datetime.now() - timedelta(days=days)
+    state_counts = Counter()
+    state_durations = defaultdict(list)
+    last_state = None
+    last_time = None
+    
+    for conv in sorted(conversations, key=lambda x: x.get("timestamp", "")):
+        if not isinstance(conv, dict):
+            continue
+        
+        timestamp = conv.get("timestamp", "")
+        state = conv.get("state", {})
+        
+        if not timestamp or not isinstance(state, dict):
+            continue
+        
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            if dt < cutoff:
+                continue
+            
+            emoji = state.get("emoji", "?")
+            state_counts[emoji] += 1
+            
+            # Calculate duration in current state
+            if last_state == emoji and last_time:
+                duration = (dt - last_time).total_seconds() / 60  # minutes
+                state_durations[emoji].append(duration)
+            
+            last_state = emoji
+            last_time = dt
+            
+        except:
+            continue
+    
+    # Calculate average durations
+    avg_durations = {}
+    for state, durations in state_durations.items():
+        if durations:
+            avg_durations[state] = sum(durations) / len(durations)
+    
+    return {
+        "counts": state_counts,
+        "avg_durations": avg_durations,
+        "total": sum(state_counts.values())
     }
 
 # === LOAD CORE DATA ===
@@ -549,6 +681,40 @@ with st.sidebar:
                 st.caption(f"• {belief[:60]}...")
     
     st.divider()
+
+    # Mental State Timeline
+    st.markdown("**📊 State Timeline (7 days):**")
+    
+    conversations = memory.get("conversations", [])
+    if len(conversations) > 5:
+        try:
+            chart = create_state_timeline(conversations, days=7)
+            if chart:
+                st.altair_chart(chart, use_container_width=True)
+            
+            # State statistics
+            stats = get_state_stats(conversations, days=7)
+            if stats["total"] > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.caption("**Most common:**")
+                    top_state = stats["counts"].most_common(1)[0]
+                    state_name = st.session_state.mental_states.get(top_state[0], {}).get("name", top_state[0])
+                    st.caption(f"{top_state[0]} {state_name}: {top_state[1]}x")
+                
+                with col2:
+                    if stats["avg_durations"]:
+                        st.caption("**Longest state:**")
+                        longest = max(stats["avg_durations"].items(), key=lambda x: x[1])
+                        state_name = st.session_state.mental_states.get(longest[0], {}).get("name", longest[0])
+                        st.caption(f"{longest[0]} {state_name}: {longest[1]:.0f}m avg")
+        except Exception as e:
+            st.caption(f"Timeline unavailable: {str(e)[:30]}")
+    else:
+        st.caption("Need 5+ conversations for timeline")
+    
+    st.divider()
     
     # State distribution
     if memory.get("conversations"):
@@ -586,6 +752,31 @@ with st.sidebar:
                 st.session_state.memory = load_all_memory()
                 st.success("Patterns extracted!")
                 st.rerun()
+            except Exception as e:
+                st.error(f"Error: {str(e)[:50]}")
+
+    if st.button("📊 Generate Weekly Report", use_container_width=True):
+        with st.spinner("Analyzing patterns..."):
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["python", "weekly_report.py"],
+                    capture_output=True,
+                    text=True,
+                    cwd=os.path.expanduser("~/secondbrain")
+                )
+                if result.returncode == 0:
+                    # Find the report file
+                    report_file = f"my_data/reports/week_{datetime.now().strftime('%Y%m%d')}.md"
+                    if os.path.exists(report_file):
+                        st.success("Report generated!")
+                        with st.expander("📄 View Report"):
+                            with open(report_file) as f:
+                                st.markdown(f.read())
+                    else:
+                        st.error("Report file not found")
+                else:
+                    st.error(f"Error: {result.stderr[:100]}")
             except Exception as e:
                 st.error(f"Error: {str(e)[:50]}")
     
