@@ -6,6 +6,8 @@ import subprocess
 import re
 import pandas as pd
 import altair as alt
+from voice_handler import speak, get_voice_handler
+from voice_conversation import VoiceConversationHandler
 from collections import defaultdict
 from datetime import datetime
 from collections import Counter
@@ -108,6 +110,7 @@ def save_conversation(entry):
         last_extract_count = st.session_state.get("last_pattern_extract", 0)
         if len(all_convos) != last_extract_count:
             st.session_state.last_pattern_extract = len(all_convos)
+
             try:
                 extractor = PatternExtractor()
                 extractor.generate_pattern_report()
@@ -431,6 +434,12 @@ if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "detected_state" not in st.session_state:
     st.session_state.detected_state = ("🧠", {"name": "logic", "confidence": 50})
+if "voice_mode" not in st.session_state:
+    st.session_state.voice_mode = False
+if "voice_conversation_count" not in st.session_state:
+    st.session_state.voice_conversation_count = 0
+if "voice_handler" not in st.session_state:
+    st.session_state.voice_handler = VoiceConversationHandler()    
 
 # === HEADER ===
 col1, col2, col3 = st.columns([2, 3, 2])
@@ -451,6 +460,19 @@ with col3:
     total_memories = len(st.session_state.memory.get("conversations", []))
     st.metric("Memories", f"{total_memories:,}")
 
+with col3:
+    # Stats
+    total_memories = len(st.session_state.memory.get("conversations", []))
+    st.metric("Memories", f"{total_memories:,}")
+    
+    # Voice mode toggle
+    if st.button("🎤 Voice Mode" if not st.session_state.voice_mode else "⏹️ Stop Voice", 
+                 type="primary" if st.session_state.voice_mode else "secondary",
+                 use_container_width=True):
+        st.session_state.voice_mode = not st.session_state.voice_mode
+        st.session_state.voice_conversation_count = 0
+        st.rerun()    
+
 st.divider()
 
 # === UNIFIED CONVERSATION INTERFACE ===
@@ -469,7 +491,17 @@ with conversation_container:
                 st.write(msg.get("content", ""))
 
 # === INPUT ===
-user_input = st.chat_input("Think, dump, question, reflect - I remember everything...")
+if st.session_state.voice_mode:
+    # Voice mode - show different UI
+    st.markdown("### 🎤 Voice Mode Active")
+    st.caption("Speak naturally. AI will respond with short questions.")
+    
+    # Use text input for now (voice recording coming next)
+    user_input = st.chat_input("Or type here (voice optimized)...")
+    
+else:
+    # Normal text mode
+    user_input = st.chat_input("Think, dump, question, reflect - I remember everything...")
 
 if user_input:
     # Analyze state
@@ -589,27 +621,47 @@ Remember: You ARE them, but better. You think faster, see clearer, remember ever
                         "content": msg.get("content", "")
                     })
             
-            try:
-                response = requests.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": "qwen2.5:7b",
-                        "messages": messages,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.7,
-                            "num_predict": 500
-                        }
-                    },
-                    timeout=60
-                )
-                
-                if response.status_code == 200:
-                    content = response.json()["message"]["content"]
+# Check if voice mode - use different response generation
+            if st.session_state.voice_mode:
+                # Voice mode: LLM-generated contextual follow-up
+                if st.session_state.voice_conversation_count == 0:
+                    # First message - use opening
+                    content = st.session_state.voice_handler.get_opening_prompt()
                 else:
-                    content = "Ollama connection failed. Is it running?"
-            except Exception as e:
-                content = f"Error: {str(e)[:100]}"
+                    # Generate contextual follow-up
+                    content = st.session_state.voice_handler.generate_follow_up(
+                        user_input,
+                        st.session_state.conversation[-5:]  # Last 5 messages for context
+                    )
+                
+                st.session_state.voice_conversation_count += 1
+                
+                # Speak the response (blocking so it finishes before rerun)
+                speak(content, blocking=True)
+                
+            else:
+                # Normal mode: full LLM response
+                try:
+                    response = requests.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": "qwen2.5:7b",
+                            "messages": messages,
+                            "stream": False,
+                            "options": {
+                                "temperature": 0.7,
+                                "num_predict": 500
+                            }
+                        },
+                        timeout=60
+                    )
+                    
+                    if response.status_code == 200:
+                        content = response.json()["message"]["content"]
+                    else:
+                        content = "Ollama connection failed. Is it running?"
+                except Exception as e:
+                    content = f"Error: {str(e)[:100]}"
             
             assistant_msg = {
                 "role": "assistant",
